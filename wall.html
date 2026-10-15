@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Video Wall</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #161616; --muted: #5d5d5d; --field: #f1f1f1;
+    --line: #d4d4d4; --accent: #1f5fd1; --on-accent: #ffffff;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000000; --fg: #ececec; --muted: #9a9a9a; --field: #161616;
+      --line: #2c2c2c; --accent: #4d8bff; --on-accent: #000000; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #000000; --fg: #ececec; --muted: #9a9a9a; --field: #161616;
+    --line: #2c2c2c; --accent: #4d8bff; --on-accent: #000000; color-scheme: dark;
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+  #setup { max-width: 36rem; margin: 0 auto; padding: 3rem 1.25rem; }
+  h1 { font-size: 1.75rem; line-height: 1.2; margin: 0 0 .35rem; font-weight: 650; }
+  .hint { margin: 0 0 1.5rem; color: var(--muted); }
+  textarea {
+    width: 100%; min-height: 12rem; padding: .75rem; resize: vertical;
+    font: inherit; font-size: .95rem; color: var(--fg);
+    background: var(--field); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-top: 1rem; }
+  button {
+    font: inherit; font-weight: 600; padding: .65rem 1.25rem; cursor: pointer;
+    border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #count { color: var(--muted); font-size: .9rem; }
+  #error { color: #d23b3b; font-size: .9rem; min-height: 1.4em; margin-top: .5rem; }
+
+  #wall { display: none; position: fixed; inset: 0; background: #000; gap: 0; }
+  iframe { width: 100%; height: 100%; border: 0; display: block; }
+  #bar {
+    display: none; position: fixed; z-index: 2; gap: .5rem;
+    top: calc(env(safe-area-inset-top, 0px) + .75rem); right: .75rem;
+  }
+  #bar button { background: rgba(0,0,0,.78); color: #fff; border-color: #444; padding: .45rem .9rem; font-size: .9rem; }
+
+  body.playing { background: #000; }
+  body.playing #setup { display: none; }
+  body.playing #wall { display: grid; }
+  body.playing:not(.fs) #bar { display: flex; }
+</style>
+</head>
+<body>
+<main id="setup">
+  <h1>Video wall</h1>
+  <p class="hint">Paste YouTube links, one per line. They play muted in a grid with no browser bars. Press Esc to leave full screen.</p>
+  <textarea id="links" spellcheck="false" aria-label="YouTube links"></textarea>
+  <div id="error" role="alert"></div>
+  <div class="row">
+    <button class="primary" id="start">Start wall</button>
+    <span id="count"></span>
+  </div>
+</main>
+
+<div id="wall"></div>
+<div id="bar">
+  <button id="fsBtn">Full screen</button>
+  <button id="editBtn">Edit links</button>
+</div>
+
+<script>
+  const KEY = "videowall.links";
+  const DEFAULTS = [
+    "https://www.youtube.com/watch?v=y9t1g8lke6g",
+    "https://www.youtube.com/watch?v=eQ_foBERmzA",
+    "https://www.youtube.com/watch?v=xXZqU5vnEug",
+    "https://www.youtube.com/watch?v=V1YJFZTIT5M"
+  ].join("\n");
+
+  const $ = id => document.getElementById(id);
+  const ta = $("links"), wall = $("wall");
+
+  const toId = s => {
+    const m = s.match(/(?:v=|youtu\.be\/|embed\/|live\/|shorts\/)([\w-]{11})/);
+    return m ? m[1] : s.trim();
+  };
+  const parse = text => text.split(/[\s,]+/).map(toId).filter(id => /^[\w-]{11}$/.test(id));
+  const layout = n => { const c = Math.ceil(Math.sqrt(n)); return [c, Math.ceil(n / c)]; };
+
+  function initial() {
+    const h = decodeURIComponent(location.hash.slice(1));
+    if (h) return h.split(",").join("\n");
+    try { return localStorage.getItem(KEY) || DEFAULTS; } catch { return DEFAULTS; }
+  }
+
+  function updateCount() {
+    const n = parse(ta.value).length;
+    if (!n) { $("count").textContent = ""; return; }
+    const [c, r] = layout(n);
+    $("count").textContent = `${n} video${n > 1 ? "s" : ""}, ${c}×${r} grid`;
+  }
+
+  function goFullscreen() {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  }
+
+  function start() {
+    const ids = parse(ta.value);
+    if (!ids.length) { $("error").textContent = "No YouTube links found. Paste at least one watch, live or youtu.be link."; return; }
+    $("error").textContent = "";
+    try { localStorage.setItem(KEY, ta.value); } catch {}
+    const [c, r] = layout(ids.length);
+    wall.style.gridTemplate = `repeat(${r}, 1fr) / repeat(${c}, 1fr)`;
+    wall.innerHTML = "";
+    ids.forEach(id => {
+      const f = document.createElement("iframe");
+      f.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&controls=1&rel=0&playsinline=1&iv_load_policy=3`;
+      f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+      f.referrerPolicy = "strict-origin-when-cross-origin";
+      f.title = "YouTube video";
+      wall.appendChild(f);
+    });
+    document.body.classList.add("playing");
+    goFullscreen();
+  }
+
+  function edit() {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    wall.innerHTML = "";
+    document.body.classList.remove("playing");
+    ta.focus();
+  }
+
+  document.addEventListener("fullscreenchange", () =>
+    document.body.classList.toggle("fs", !!document.fullscreenElement));
+
+  ta.value = initial();
+  updateCount();
+  ta.addEventListener("input", updateCount);
+  ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) start(); });
+  $("start").addEventListener("click", start);
+  $("fsBtn").addEventListener("click", goFullscreen);
+  $("editBtn").addEventListener("click", edit);
+</script>
+</body>
+</html>
